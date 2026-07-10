@@ -1,0 +1,1103 @@
+#LAPTOP 1 - CENTRAL HUB - DOCKER 
+laptop1-adeena/docker-compose-laptop1.yml
+yaml
+services:
+  database:
+    image: mysql:8.0
+    container_name: itt440-db
+    environment:
+      MYSQL_ROOT_PASSWORD: secretpass
+      MYSQL_DATABASE: library_stats
+    ports:
+      - "3306:3306"
+    networks:
+      - itt440_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-psecretpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+
+#LAPTOP 1 - C CLIENT
+laptop1-adeena/c-client/client.c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+#define PORT 8080
+#define SERVER_IP "172.18.0.3"
+#define POINTS_ADDED 3
+
+int main() {
+    int sock;
+    struct sockaddr_in serv_addr;
+    char buffer[1024] = {0};
+
+    printf("[C Client] Starting...\n");
+    printf("[C Client] Connecting to server on port %d\n", PORT);
+    printf("[C Client] Points added per update: +%d\n", POINTS_ADDED);
+    printf("========================================\n\n");
+    fflush(stdout);
+
+    while (1) {
+        if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+            printf("[C Client] ❌ Socket creation error\n");
+            fflush(stdout);
+            return 1;
+        }
+
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(PORT);
+
+        if (inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
+            printf("[C Client] ❌ Invalid address\n");
+            fflush(stdout);
+            return 1;
+        }
+
+        if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+            printf("[C Client] ⏳ Waiting for server...\n");
+            fflush(stdout);
+            close(sock);
+            sleep(2);
+            continue;
+        }
+
+        char *msg = "PING";
+        send(sock, msg, strlen(msg), 0);
+        printf("[C Client] 📤 Sent: %s\n", msg);
+        fflush(stdout);
+
+        int valread = read(sock, buffer, 1024);
+        if (valread > 0) {
+            buffer[valread] = '\0';
+            printf("[C Client] 📥 Server response: %s\n", buffer);
+            printf("[C Client] ✅ +%d points added to database!\n", POINTS_ADDED);
+            fflush(stdout);
+        } else {
+            printf("[C Client] ❌ No response from server\n");
+            fflush(stdout);
+        }
+
+        close(sock);
+        printf("========================================\n\n");
+        fflush(stdout);
+        sleep(30);
+    }
+
+    return 0;
+}
+
+
+
+#LAPTOP 1 - C CLIENT - DOCKERFILE
+laptop1-adeena/c-client/Dockerfile
+dockerfile
+FROM gcc:latest
+WORKDIR /app
+COPY client.c .
+RUN gcc client.c -o client
+CMD ["./client"]
+
+
+
+#LAPTOP 1 - C SERVER
+laptop1-adeena/c-server/server.c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <mariadb/mysql.h>
+#include <pthread.h>
+#include <time.h>
+
+#define PORT 8080
+#define NODE_USER "Adeena"
+#define DB_HOST "database"
+#define DB_USER "root"
+#define DB_PASS "secretpass"
+#define DB_NAME "library_stats"
+
+MYSQL *conn;
+
+void* update_points(void* arg) {
+    while (1) {
+        sleep(30);
+        char query[256];
+        sprintf(query, "UPDATE segmen_mata SET points = points + 3 WHERE user = '%s'", NODE_USER);
+        if (mysql_query(conn, query)) {
+            printf("[Error] Update failed: %s\n", mysql_error(conn));
+            fflush(stdout);
+        } else {
+            printf("[Adeena] ✅ Points updated! +3\n");
+            fflush(stdout);
+        }
+    }
+    return NULL;
+}
+
+int main() {
+    printf("[Adeena] Starting server...\n");
+    fflush(stdout);
+
+    conn = mysql_init(NULL);
+    if (!mysql_real_connect(conn, DB_HOST, DB_USER, DB_PASS, DB_NAME, 3306, NULL, 0)) {
+        printf("[Error] DB connection failed: %s\n", mysql_error(conn));
+        fflush(stdout);
+        return 1;
+    }
+    printf("[Adeena] ✅ Connected to database\n");
+    fflush(stdout);
+
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("socket failed");
+        return 1;
+    }
+
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("setsockopt");
+        return 1;
+    }
+
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("bind failed");
+        return 1;
+    }
+
+    if (listen(server_fd, 3) < 0) {
+        perror("listen");
+        return 1;
+    }
+
+    printf("[Adeena] C Server listening on port %d\n", PORT);
+    fflush(stdout);
+
+    pthread_t thread;
+    pthread_create(&thread, NULL, update_points, NULL);
+
+    char buffer[1024] = {0};
+    while (1) {
+        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+            perror("accept");
+            continue;
+        }
+        int valread = read(new_socket, buffer, 1024);
+        if (valread > 0) {
+            buffer[valread] = '\0';
+            printf("[Adeena] Received: %s\n", buffer);
+            fflush(stdout);
+            send(new_socket, "OK", 2, 0);
+        }
+        close(new_socket);
+    }
+
+    mysql_close(conn);
+    return 0;
+}
+
+
+
+#LAPTOP 1 - C SERVER - DOCKERFILE
+laptop1-adeena/c-server/Dockerfile
+dockerfile
+FROM gcc:latest
+RUN apt-get update && apt-get install -y libmariadb-dev
+WORKDIR /app
+COPY server.c .
+RUN gcc server.c -o server -lmariadb -lpthread
+EXPOSE 8080
+CMD ["./server"]
+
+
+
+#LAPTOP 1 - DATABASE
+laptop1-adeena/database/init.sql
+CREATE DATABASE IF NOT EXISTS library_stats;
+USE library_stats;
+
+CREATE TABLE IF NOT EXISTS segmen_mata (
+    user VARCHAR(50) PRIMARY KEY,
+    points INT NOT NULL DEFAULT 0,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+INSERT INTO segmen_mata (user, points) VALUES 
+('Adeena', 0), ('Mastura', 0), ('Azra', 0),
+('Aina', 0), ('Fasihah', 0), ('Irdina', 0);
+
+SELECT * FROM segmen_mata;
+
+
+
+#LAPTOP 1 - DOCKERFILE
+laptop1-adeena/web-monitor/Dockerfile
+dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+RUN pip install flask pymysql
+COPY monitor.py .
+EXPOSE 5000
+CMD ["python", "monitor.py"]
+
+
+
+#LAPTOP 1 - WEB MONITOR 
+laptop1-adeena/web-monitor/monitor.py
+python
+from flask import Flask, render_template_string
+import pymysql
+import os
+
+app = Flask(__name__)
+
+def get_db():
+    return pymysql.connect(
+        host=os.environ.get('DB_HOST', 'database'),
+        user='root',
+        password='secretpass',
+        database='library_stats',
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ITT440 Leaderboard</title>
+    <style>
+        body { font-family: Arial; background: #0f172a; color: white; text-align: center; padding: 40px; }
+        h1 { color: #38bdf8; }
+        .leaderboard { max-width: 700px; margin: 0 auto; background: #1e293b; padding: 25px; border-radius: 12px; }
+        .player { display: flex; justify-content: space-between; padding: 12px; border-bottom: 1px solid #334155; }
+        .badge-c { background: #f59e0b; color: #0f172a; padding: 4px 12px; border-radius: 20px; font-weight: bold; }
+        .badge-py { background: #10b981; color: #0f172a; padding: 4px 12px; border-radius: 20px; font-weight: bold; }
+        .points { font-weight: bold; color: #34d399; }
+    </style>
+    <script>setInterval(function(){ location.reload(); }, 2000);</script>
+</head>
+<body>
+    <h1>ITT440 Leaderboard</h1>
+    <div class="leaderboard">
+        {% for row in players %}
+        <div class="player">
+            <span>#{{ loop.index }} {{ row.user }}</span>
+            <span>
+                {% if row.user in ['Adeena', 'Fasihah'] %}
+                <span class="badge-c">C Primitive Socket</span>
+                {% else %}
+                <span class="badge-py">Python Multi-Thread</span>
+                {% endif %}
+                {{ row.points }} pts
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    try:
+        db = get_db()
+        with db.cursor() as cur:
+            cur.execute("SELECT user, points FROM segmen_mata ORDER BY points DESC")
+            players = cur.fetchall()
+        db.close()
+    except Exception as e:
+        print(f"Error: {e}")
+        players = []
+    return render_template_string(HTML, players=players)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
+
+
+#LAPTOP 1 - DOCKER COMPOSE
+laptop1-adeena/docker-compose-laptop1.yml
+yaml
+services:
+  database:
+    image: mysql:8.0
+    container_name: itt440-db
+    environment:
+      MYSQL_ROOT_PASSWORD: secretpass
+      MYSQL_DATABASE: library_stats
+    ports:
+      - "3306:3306"
+    networks:
+      - itt440_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-psecretpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web_monitor:
+    build: ./web-monitor
+    container_name: itt440-web-monitor
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_HOST=database
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - itt440_net
+    restart: unless-stopped
+
+  c_server:
+    build: ./c-server
+    container_name: c-server-container
+    ports:
+      - "8080:8080"
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - itt440_net
+    restart: unless-stopped
+
+  c_client:
+    build: ./c-client
+    container_name: c-client-container
+    depends_on:
+      - c_server
+    networks:
+      - itt440_net
+    restart: unless-stopped
+
+networks:
+  itt440_net:
+    driver: bridge
+
+
+
+#LAPTOP 2 - C NODE - DOCKER FILE
+laptop2-mastura/docker-compose.yml
+yaml
+services:
+  mastura-server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    container_name: mastura-server
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+
+  mastura-client:
+    build:
+      context: .
+      dockerfile: client.Dockerfile
+    container_name: mastura-client
+    depends_on:
+      - mastura-server
+    restart: unless-stopped
+
+
+
+#LAPTOP 2 - SERVER PY
+laptop2-mastura/server.py
+python
+import socket
+import pymysql
+import time
+
+NODE_USER = 'Mastura'
+LAPTOP1_IP = '192.168.43.248'
+POINTS_ADDED = 3
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(('0.0.0.0', 8082))
+server.listen(5)
+print(f'[{NODE_USER}] Server on port 8082', flush=True)
+print(f'[{NODE_USER}] Points added per update: +{POINTS_ADDED}', flush=True)
+
+while True:
+    try:
+        conn, addr = server.accept()
+        print(f'[{NODE_USER}] Client connected from {addr}', flush=True)
+        msg = conn.recv(1024).decode()
+        
+        if "PING" in msg:
+            try:
+                db = pymysql.connect(host=LAPTOP1_IP, user='root', password='secretpass', database='library_stats', autocommit=True)
+                with db.cursor() as cursor:
+                    cursor.execute(f"UPDATE segmen_mata SET points = points + {POINTS_ADDED} WHERE user = '{NODE_USER}'")
+                db.close()
+                print(f'[{NODE_USER}] ✅ +{POINTS_ADDED}', flush=True)
+                conn.sendall(b"OK")
+            except Exception as e:
+                print(f'[Error] {e}', flush=True)
+                conn.sendall(b"FAIL")
+        conn.close()
+    except Exception as e:
+        print(f'[Server Error] {e}', flush=True)
+        time.sleep(1)
+
+
+#LAPTOP 2 - CLIENT PY
+laptop2-mastura/client.py
+python
+import socket
+import time
+
+NODE_USER = 'Mastura'
+POINTS_ADDED = 3
+
+print(f"[C Client] Starting...")
+print(f"[C Client] Connecting to server on port 8082")
+print(f"[C Client] Points added per update: +{POINTS_ADDED}")
+print("========================================\n")
+
+while True:
+    try:
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect(('mastura-server', 8082))
+        print("[C Client] ✅ Connected to server!")
+
+        client.sendall(b"PING")
+        print("[C Client] 📤 Sent: PING")
+
+        response = client.recv(1024).decode()
+        print(f"[C Client] 📥 Server response: {response}")
+        print(f"[C Client] ✅ +{POINTS_ADDED} points added to database!")
+
+        client.close()
+        print("========================================\n")
+
+    except ConnectionRefusedError:
+        print("[C Client] ⏳ Waiting for server...")
+    except Exception as e:
+        print(f"[C Client] Error: {e}")
+
+    time.sleep(30)
+
+
+#LAPTOP 2 - SERVER DOCKERFILE
+laptop2-mastura/server.Dockerfile
+dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY server.py .
+RUN pip install pymysql
+CMD ["python", "server.py"]
+
+
+#LAPTOP 2 - CLIENT DOCKERFILE
+laptop2-mastura/client.Dockerfile
+dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY client.py .
+CMD ["python", "client.py"]
+
+
+#LAPTOP 3 - C NODE - DOCKER COMPOSE
+laptop3-azra/docker-compose.yml
+yaml
+services:
+  azra-server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    container_name: azra-server
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+
+  azra-client:
+    build:
+      context: .
+      dockerfile: client.Dockerfile
+    container_name: azra-client
+    depends_on:
+      - azra-server
+    restart: unless-stopped
+
+
+#LAPTOP 3 - SERVER PY
+laptop3-azra/server.py
+python
+import socket
+import pymysql
+import time
+
+NODE_USER = 'Azra'
+LAPTOP1_IP = '192.168.43.248'
+POINTS_ADDED = 3
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(('0.0.0.0', 8082))
+server.listen(5)
+print(f'[{NODE_USER}] Server on port 8082', flush=True)
+print(f'[{NODE_USER}] Points added per update: +{POINTS_ADDED}', flush=True)
+
+while True:
+    try:
+        conn, addr = server.accept()
+        print(f'[{NODE_USER}] Client connected from {addr}', flush=True)
+        msg = conn.recv(1024).decode()
+        
+        if "PING" in msg:
+            try:
+                db = pymysql.connect(host=LAPTOP1_IP, user='root', password='secretpass', database='library_stats', autocommit=True)
+                with db.cursor() as cursor:
+                    cursor.execute(f"UPDATE segmen_mata SET points = points + {POINTS_ADDED} WHERE user = '{NODE_USER}'")
+                db.close()
+                print(f'[{NODE_USER}] ✅ +{POINTS_ADDED}', flush=True)
+                conn.sendall(b"OK")
+            except Exception as e:
+                print(f'[Error] {e}', flush=True)
+                conn.sendall(b"FAIL")
+        conn.close()
+    except Exception as e:
+        print(f'[Server Error] {e}', flush=True)
+        time.sleep(1)
+
+
+#LAPTOP 3 - CLIENT PY
+laptop3-azra/client.py
+python
+import socket
+import time
+
+NODE_USER = 'Azra'
+POINTS_ADDED = 3
+
+print(f"[C Client] Starting...")
+print(f"[C Client] Connecting to server on port 8082")
+print(f"[C Client] Points added per update: +{POINTS_ADDED}")
+print("========================================\n")
+
+while True:
+    try:
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect(('azra-server', 8082))
+        print("[C Client] ✅ Connected to server!")
+
+        client.sendall(b"PING")
+        print("[C Client] 📤 Sent: PING")
+
+        response = client.recv(1024).decode()
+        print(f"[C Client] 📥 Server response: {response}")
+        print(f"[C Client] ✅ +{POINTS_ADDED} points added to database!")
+
+        client.close()
+        print("========================================\n")
+
+    except ConnectionRefusedError:
+        print("[C Client] ⏳ Waiting for server...")
+    except Exception as e:
+        print(f"[C Client] Error: {e}")
+
+    time.sleep(30)
+
+
+#LAPTOP 3 - SERVER - DOCKERFILE
+laptop3-azra/server.Dockerfile
+dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY server.py .
+RUN pip install pymysql
+CMD ["python", "server.py"]
+
+
+#LAPTOP 3 - CLIENT - DOCKERFILE
+laptop3-azra/client.Dockerfile
+dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY client.py .
+CMD ["python", "client.py"]
+
+
+#LAPTOP 4 - PYTHON NODE - DOCKER COMPOSE
+laptop4-aina/docker-compose.yml
+yaml
+services:
+  aina-server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    container_name: aina-server
+    ports:
+      - "8084:8084"
+    restart: unless-stopped
+
+  aina-client:
+    build:
+      context: .
+      dockerfile: client.Dockerfile
+    container_name: aina-client
+    depends_on:
+      - aina-server
+    restart: unless-stopped
+
+
+#LAPTOP 4 - SERVER PY
+laptop4-aina/server.py
+python
+import socket
+import pymysql
+import time
+
+NODE_USER = 'Aina'
+LAPTOP1_IP = '192.168.43.248'
+POINTS_ADDED = 4
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(('0.0.0.0', 8084))
+server.listen(5)
+print(f'[{NODE_USER}] Server on port 8084', flush=True)
+print(f'[{NODE_USER}] Points added per update: +{POINTS_ADDED}', flush=True)
+
+while True:
+    try:
+        conn, addr = server.accept()
+        print(f'[{NODE_USER}] Client connected from {addr}', flush=True)
+        msg = conn.recv(1024).decode()
+        
+        if "TRIGGER" in msg:
+            try:
+                db = pymysql.connect(host=LAPTOP1_IP, user='root', password='secretpass', database='library_stats', autocommit=True)
+                with db.cursor() as cursor:
+                    cursor.execute(f"UPDATE segmen_mata SET points = points + {POINTS_ADDED} WHERE user = '{NODE_USER}'")
+                db.close()
+                print(f'[{NODE_USER}] ✅ +{POINTS_ADDED}', flush=True)
+                conn.sendall(b"OK")
+            except Exception as e:
+                print(f'[Error] {e}', flush=True)
+                conn.sendall(b"FAIL")
+        conn.close()
+    except Exception as e:
+        print(f'[Server Error] {e}', flush=True)
+        time.sleep(1)
+
+
+#LAPTOP 4 - CLIENT PY
+laptop4-aina/client.py
+python
+import socket
+import time
+
+NODE_USER = 'Aina'
+POINTS_ADDED = 4
+
+print(f"[Python Client] Starting...")
+print(f"[Python Client] Connecting to server on port 8084")
+print(f"[Python Client] Points added per update: +{POINTS_ADDED}")
+print("========================================\n")
+
+while True:
+    try:
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect(('aina-server', 8084))
+        print("[Python Client] ✅ Connected to server!")
+
+        client.sendall(b"TRIGGER")
+        print("[Python Client] 📤 Sent: TRIGGER")
+
+        response = client.recv(1024).decode()
+        print(f"[Python Client] 📥 Server response: {response}")
+        print(f"[Python Client] ✅ +{POINTS_ADDED} points added to database!")
+
+        client.close()
+        print("========================================\n")
+
+    except ConnectionRefusedError:
+        print("[Python Client] ⏳ Waiting for server...")
+    except Exception as e:
+        print(f"[Python Client] Error: {e}")
+
+    time.sleep(30)
+
+
+#LAPTOP 4 - SERVER - DOCKERFILE
+laptop4-aina/server.Dockerfile
+dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY server.py .
+RUN pip install pymysql
+CMD ["python", "server.py"]
+
+
+#LAPTOP 4 - CLIENT - DOCKERFILE
+laptop4-aina/client.Dockerfile
+dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY client.py .
+CMD ["python", "client.py"]
+
+
+#LAPTOP 5 - C NODE - DOCKER COMPOSE
+laptop5-fasihah/docker-compose.yml
+yaml
+services:
+  fasihah-server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    container_name: fasihah-server
+    network_mode: host
+    restart: unless-stopped
+
+  fasihah-client:
+    build:
+      context: .
+      dockerfile: client.Dockerfile
+    container_name: fasihah-client
+    network_mode: host
+    depends_on:
+      - fasihah-server
+    restart: unless-stopped
+
+
+#LAPTOP 5 - C SERVER
+laptop5-fasihah/server.c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <mariadb/mysql.h>
+#include <pthread.h>
+#include <time.h>
+
+#define PORT 8083
+#define NODE_USER "Fasihah"
+#define DB_HOST "192.168.43.248"
+#define DB_USER "root"
+#define DB_PASS "secretpass"
+#define DB_NAME "library_stats"
+#define POINTS_ADDED 3
+
+MYSQL *conn;
+
+void* update_points(void* arg) {
+    while (1) {
+        sleep(30);
+        char query[256];
+        sprintf(query, "UPDATE segmen_mata SET points = points + %d WHERE user = '%s'", POINTS_ADDED, NODE_USER);
+        if (mysql_query(conn, query)) {
+            printf("[Error] Update failed: %s\n", mysql_error(conn));
+            fflush(stdout);
+        } else {
+            printf("[Fasihah] ✅ Points updated! +%d\n", POINTS_ADDED);
+            fflush(stdout);
+        }
+    }
+    return NULL;
+}
+
+int main() {
+    printf("[Fasihah] Starting server...\n");
+    fflush(stdout);
+    printf("[Fasihah] Points added per update: +%d\n", POINTS_ADDED);
+    fflush(stdout);
+
+    conn = mysql_init(NULL);
+    if (!mysql_real_connect(conn, DB_HOST, DB_USER, DB_PASS, DB_NAME, 3306, NULL, 0)) {
+        printf("[Error] DB connection failed: %s\n", mysql_error(conn));
+        fflush(stdout);
+        return 1;
+    }
+    printf("[Fasihah] ✅ Connected to database\n");
+    fflush(stdout);
+
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("socket failed");
+        return 1;
+    }
+
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("setsockopt");
+        return 1;
+    }
+
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("bind failed");
+        return 1;
+    }
+
+    if (listen(server_fd, 3) < 0) {
+        perror("listen");
+        return 1;
+    }
+
+    printf("[Fasihah] C Server listening on port %d\n", PORT);
+    fflush(stdout);
+
+    pthread_t thread;
+    pthread_create(&thread, NULL, update_points, NULL);
+
+    char buffer[1024] = {0};
+    while (1) {
+        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+            perror("accept");
+            continue;
+        }
+        int valread = read(new_socket, buffer, 1024);
+        if (valread > 0) {
+            buffer[valread] = '\0';
+            printf("[Fasihah] Received: %s\n", buffer);
+            fflush(stdout);
+            send(new_socket, "OK", 2, 0);
+        }
+        close(new_socket);
+    }
+
+    mysql_close(conn);
+    return 0;
+}
+
+
+#LAPTOP 5 - C CLIENT
+laptop5-fasihah/client.c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+#define PORT 8083
+#define SERVER_IP "127.0.0.1"
+#define POINTS_ADDED 3
+
+int main() {
+    int sock;
+    struct sockaddr_in serv_addr;
+    char buffer[1024] = {0};
+
+    printf("[C Client] Starting...\n");
+    printf("[C Client] Connecting to server on port %d\n", PORT);
+    printf("[C Client] Points added per update: +%d\n", POINTS_ADDED);
+    printf("========================================\n\n");
+    fflush(stdout);
+
+    while (1) {
+        if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+            printf("[C Client] ❌ Socket creation error\n");
+            fflush(stdout);
+            return 1;
+        }
+
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(PORT);
+
+        if (inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
+            printf("[C Client] ❌ Invalid address\n");
+            fflush(stdout);
+            return 1;
+        }
+
+        if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+            printf("[C Client] ⏳ Waiting for server...\n");
+            fflush(stdout);
+            close(sock);
+            sleep(2);
+            continue;
+        }
+
+        char *msg = "PING";
+        send(sock, msg, strlen(msg), 0);
+        printf("[C Client] 📤 Sent: %s\n", msg);
+        fflush(stdout);
+
+        int valread = read(sock, buffer, 1024);
+        if (valread > 0) {
+            buffer[valread] = '\0';
+            printf("[C Client] 📥 Server response: %s\n", buffer);
+            printf("[C Client] ✅ +%d points added to database!\n", POINTS_ADDED);
+            fflush(stdout);
+        } else {
+            printf("[C Client] ❌ No response from server\n");
+            fflush(stdout);
+        }
+
+        close(sock);
+        printf("========================================\n\n");
+        fflush(stdout);
+        sleep(30);
+    }
+
+    return 0;
+}
+
+
+#LAPTOP 5 - SERVER - DOCKERFILE
+laptop5-fasihah/server.Dockerfile
+dockerfile
+FROM gcc:latest
+RUN apt-get update && apt-get install -y libmariadb-dev
+WORKDIR /app
+COPY server.c .
+RUN gcc server.c -o server -lmariadb -lpthread
+EXPOSE 8083
+CMD ["./server"]
+
+
+#LAPTOP 5 - CLIENT - DOCKERFILE
+laptop5-fasihah/client.Dockerfile
+dockerfile
+FROM gcc:latest
+WORKDIR /app
+COPY client.c .
+RUN gcc client.c -o client
+CMD ["./client"]
+
+
+#LAPTOP 6 - PYTHON NODE - DOCKER COMPOSE
+laptop6-irdina/docker-compose.yml
+yaml
+services:
+  irdina-server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    container_name: irdina-server
+    ports:
+      - "8084:8084"
+    restart: unless-stopped
+
+  irdina-client:
+    build:
+      context: .
+      dockerfile: client.Dockerfile
+    container_name: irdina-client
+    depends_on:
+      - irdina-server
+    restart: unless-stopped
+
+
+#LAPTOP 6 - SERVER PY
+laptop6-irdina/server.py
+python
+import socket
+import pymysql
+import time
+
+NODE_USER = 'Irdina'
+LAPTOP1_IP = '192.168.43.248'
+POINTS_ADDED = 4
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(('0.0.0.0', 8084))
+server.listen(5)
+print(f'[{NODE_USER}] Server on port 8084', flush=True)
+print(f'[{NODE_USER}] Points added per update: +{POINTS_ADDED}', flush=True)
+
+while True:
+    try:
+        conn, addr = server.accept()
+        print(f'[{NODE_USER}] Client connected from {addr}', flush=True)
+        msg = conn.recv(1024).decode()
+        
+        if "TRIGGER" in msg:
+            try:
+                db = pymysql.connect(host=LAPTOP1_IP, user='root', password='secretpass', database='library_stats', autocommit=True)
+                with db.cursor() as cursor:
+                    cursor.execute(f"UPDATE segmen_mata SET points = points + {POINTS_ADDED} WHERE user = '{NODE_USER}'")
+                db.close()
+                print(f'[{NODE_USER}] ✅ +{POINTS_ADDED}', flush=True)
+                conn.sendall(b"OK")
+            except Exception as e:
+                print(f'[Error] {e}', flush=True)
+                conn.sendall(b"FAIL")
+        conn.close()
+    except Exception as e:
+        print(f'[Server Error] {e}', flush=True)
+        time.sleep(1)
+
+
+#LAPTOP 6 - CLIENT PY
+laptop6-irdina/client.py
+python
+import socket
+import time
+
+NODE_USER = 'Irdina'
+POINTS_ADDED = 4
+
+print(f"[Python Client] Starting...")
+print(f"[Python Client] Connecting to server on port 8084")
+print(f"[Python Client] Points added per update: +{POINTS_ADDED}")
+print("========================================\n")
+
+while True:
+    try:
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect(('irdina-server', 8084))
+        print("[Python Client] ✅ Connected to server!")
+
+        client.sendall(b"TRIGGER")
+        print("[Python Client] 📤 Sent: TRIGGER")
+
+        response = client.recv(1024).decode()
+        print(f"[Python Client] 📥 Server response: {response}")
+        print(f"[Python Client] ✅ +{POINTS_ADDED} points added to database!")
+
+        client.close()
+        print("========================================\n")
+
+    except ConnectionRefusedError:
+        print("[Python Client] ⏳ Waiting for server...")
+    except Exception as e:
+        print(f"[Python Client] Error: {e}")
+
+    time.sleep(30)
+
+
+#LAPTOP 6 - SERVER - DOCKERFILE
+laptop6-irdina/server.Dockerfile
+dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY server.py .
+RUN pip install pymysql
+CMD ["python", "server.py"]
+
+
+#LAPTOP 6 - CLIENT - DOCKERFILE
+laptop6-irdina/client.Dockerfile
+dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY client.py .
+CMD ["python", "client.py"]
+ 
