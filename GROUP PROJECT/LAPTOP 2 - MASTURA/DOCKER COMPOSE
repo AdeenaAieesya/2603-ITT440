@@ -1,0 +1,15 @@
+
+      dockerfile: server.Dockerfile
+    container_name: mastura-server
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+
+  mastura-client:
+    build:
+      context: .
+      dockerfile: client.Dockerfile
+    container_name: mastura-client
+    depends_on:
+      - mastura-server
+    restart: unless-stopped
