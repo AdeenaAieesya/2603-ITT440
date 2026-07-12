@@ -96,12 +96,15 @@ docker compose up -d
 ```
 
 
-# HOW TO RUN WEB DASHBOARD
+# HOW TO RUN WEB DASHBOARD AND WEB MONITOR
 FOR LAPTOP 1:
 ```bash
 http://localhost:5000
 ```
 <img width="1918" height="687" alt="Screenshot 2026-07-12 211143" src="https://github.com/user-attachments/assets/8b6f5038-7bef-4f96-ac2e-a455bbaf5081" />
+
+<img width="933" height="352" alt="Screenshot 2026-07-12 215950" src="https://github.com/user-attachments/assets/9fb18e83-e4a3-49c8-b39f-40181b8510cc" />
+
 
 
 FOR OTHER LAPTOPS:
