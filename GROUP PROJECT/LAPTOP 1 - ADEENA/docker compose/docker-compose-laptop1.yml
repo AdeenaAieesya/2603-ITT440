@@ -1,0 +1,57 @@
+yaml
+services:
+  database:
+    image: mysql:8.0
+    container_name: itt440-db
+    environment:
+      MYSQL_ROOT_PASSWORD: secretpass
+      MYSQL_DATABASE: library_stats
+    ports:
+      - "3306:3306"
+    networks:
+      - itt440_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-psecretpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web_monitor:
+    build: ./web-monitor
+    container_name: itt440-web-monitor
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_HOST=database
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - itt440_net
+    restart: unless-stopped
+
+  c_server:
+    build: ./c-server
+    container_name: c-server-container
+    ports:
+      - "8080:8080"
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - itt440_net
+    restart: unless-stopped
+
+  c_client:
+    build: ./c-client
+    container_name: c-client-container
+    depends_on:
+      - c_server
+    networks:
+      - itt440_net
+    restart: unless-stopped
+
+networks:
+  itt440_net:
+    driver: bridge
