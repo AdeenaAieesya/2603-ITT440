@@ -1,0 +1,19 @@
+yaml
+services:
+  aina-server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    container_name: aina-server
+    ports:
+      - "8084:8084"
+    restart: unless-stopped
+
+  aina-client:
+    build:
+      context: .
+      dockerfile: client.Dockerfile
+    container_name: aina-client
+    depends_on:
+      - aina-server
+    restart: unless-stopped
