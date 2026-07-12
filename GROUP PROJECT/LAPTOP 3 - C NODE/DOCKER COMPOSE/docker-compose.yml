@@ -1,0 +1,19 @@
+yaml
+services:
+  azra-server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    container_name: azra-server
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+
+  azra-client:
+    build:
+      context: .
+      dockerfile: client.Dockerfile
+    container_name: azra-client
+    depends_on:
+      - azra-server
+    restart: unless-stopped
