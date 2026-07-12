@@ -94,6 +94,8 @@ FOR LAPTOP 1:
 ```bash
 http://localhost:5000
 ```
+<img width="1918" height="687" alt="Screenshot 2026-07-12 211143" src="https://github.com/user-attachments/assets/8b6f5038-7bef-4f96-ac2e-a455bbaf5081" />
+
 
 FOR OTHER LAPTOPS:
 ```bash
