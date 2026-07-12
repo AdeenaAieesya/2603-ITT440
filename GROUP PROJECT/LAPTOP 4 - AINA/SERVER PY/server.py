@@ -1,4 +1,3 @@
-python
 import socket
 import pymysql
 import time
