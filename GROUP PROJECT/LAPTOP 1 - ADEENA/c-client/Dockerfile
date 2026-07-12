@@ -1,4 +1,3 @@
-dockerfile
 FROM gcc:latest
 WORKDIR /app
 COPY client.c .
