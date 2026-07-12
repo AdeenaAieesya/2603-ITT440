@@ -1,0 +1,19 @@
+yaml
+services:
+  fasihah-server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    container_name: fasihah-server
+    network_mode: host
+    restart: unless-stopped
+
+  fasihah-client:
+    build:
+      context: .
+      dockerfile: client.Dockerfile
+    container_name: fasihah-client
+    network_mode: host
+    depends_on:
+      - fasihah-server
+    restart: unless-stopped
