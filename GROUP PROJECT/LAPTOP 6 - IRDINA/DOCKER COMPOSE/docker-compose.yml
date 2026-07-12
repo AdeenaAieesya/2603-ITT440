@@ -1,0 +1,19 @@
+yaml
+services:
+  irdina-server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    container_name: irdina-server
+    ports:
+      - "8084:8084"
+    restart: unless-stopped
+
+  irdina-client:
+    build:
+      context: .
+      dockerfile: client.Dockerfile
+    container_name: irdina-client
+    depends_on:
+      - irdina-server
+    restart: unless-stopped
